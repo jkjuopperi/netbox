@@ -260,10 +260,88 @@ class OpengearSSH(SSHClient):
             'modules': [],
         }
 
+class HPSSH(SSHClient):
+    """
+    SSH client for HP devices
+    """
+    default_credentials = {
+        'username': 'admin',
+        'password': 'default',
+    }
+
+    def get_lldp_neighbors(self):
+
+        try:
+            content = _send("show lldp info remote-device detail")
+        except:
+            raise RuntimeError("Failed to get LLDP information from device.")
+
+        result = []
+        n = None
+        for l in content.split('\n'):
+            local_port_re = re.match("^  Local Port   : (.*)$", l)
+            if local_port_re != None:
+                n = dict()
+                n['local-interface'] = local_port_re.group(1).strip()
+                continue
+    
+            chassis_id_re = re.match("^  ChassisId    : (.*)$", l)
+            if chassis_id_re != None:
+                n['chassis-id'] = chassis_id_re.group(1).strip()
+                continue
+        
+            remote_iface_re = re.match("^  PortId       : (.*)$", l)
+            if remote_iface_re != None:
+                n['remote-interface'] = remote_iface_re.group(1).strip()
+                continue
+        
+            name_re = re.match("^  SysName      : (.*)", l)
+            if name_re != None:
+                n['name'] = name_re.group(1).strip()
+                continue
+        
+            if len(l.strip()) == 0:
+                if n != None:
+                    result.append(n)
+                    n = None
+
+        return result
+
+    def get_inventory(self):
+
+        try:
+            content = _send("show modules")
+            print(content)
+        except:
+            raise RuntimeError("Failed to get module information from device.")
+
+        (description, serial) = re.search("Chassis: (\w....................) Serial Number:\s+(\w+)\s+", content).groups()
+
+        modules = []
+
+        for l in content.split('\n'):
+            m = re.match("^  (\w....) (\w.....................................) (\w.............) (\w.......) (\w....) ([0-9]..)$", l)
+            if m != None:
+                (module, descr, modserial, state, core, modver) = m.groups()
+                modules.append({
+                               'name': descr.strip(),
+                               'part_id': re.match("\w+ (\w+) \w+.*", descr.strip()).group(1),
+                               'serial': modserial.strip()
+                               })
+
+        return {
+            'chassis': {
+                'serial': serial,
+                'description': description.strip(),
+            },
+            'modules': [],
+        }
+
 
 # For mapping platform -> NC client
 RPC_CLIENTS = {
     'juniper-junos': JunosNC,
     'cisco-ios': IOSSSH,
     'opengear': OpengearSSH,
+    'hp': HPSSH,
 }
